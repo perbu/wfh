@@ -23,7 +23,7 @@ This CLI tool is designed for developers who want a quick way to mark a day as "
 
 1. Install the CLI tool:
    ```bash
-   go install https://github.com/perbu/wfh.git
+   go install github.com/perbu/wfh.git@latest
    ```
 
 2. Place your `credentials.json` in the `~/.wfh` directory.
