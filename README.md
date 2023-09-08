@@ -28,6 +28,16 @@ This CLI tool is designed for developers who want a quick way to mark a day as "
 
 2. Place your `credentials.json` in the `~/.wfh` directory.
 
+3. Create a config file in `~/.wfh/config.json` with the following content:
+   ```json
+   {
+     "CalendarID": "blahbla@group.calendar.google.com",
+     "DefaultMessage": "%s wfh",
+     "User": "Your name here"
+   }
+   ``
+
+You can skip DefaultMessage and User if you want to use the defaults. The default for User is to use $USER.
 
 ## Usage
 
@@ -39,22 +49,15 @@ This CLI tool is designed for developers who want a quick way to mark a day as "
 
 2. To mark today as a WFH day:
    ```bash
-   .wfh
+   wfh
    ```
 
 3. Check Google Calendar. You should see a new all-day event titled "$USER wfh".
 
-## Configuration
-
-The tool will generate a configuration file in `~/.wfh/config.json`. You can modify this file to change:
-
-- `CalendarID`: The ID of your Google Calendar (default is "primary").
-- `DefaultMessage`: The default message for the event (default is "wfh").
-- `User`: If you wish to override the `$USER` environment variable, specify the name here.
-
 ## Contributions
 
-Feel free to open an issue or submit a pull request if you have suggestions, improvements, or bug fixes. All contributions are welcome!
+Feel free to open an issue or submit a pull request if you have suggestions, improvements, or bug fixes. 
+All contributions are welcome!
 
 ## License
 
