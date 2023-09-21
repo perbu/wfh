@@ -9,6 +9,7 @@ import (
 	calendar "google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,9 +35,10 @@ func getClient(config *oauth2.Config, tokenPath string) *calendar.Service {
 	if err != nil {
 		tok = getTokenFromWeb(config, tokenPath)
 	}
-
+	if tok != nil {
+		fmt.Printf("Token loaded, len(refresh) is %d\n", len(tok.RefreshToken))
+	}
 	client := config.Client(context.Background(), tok)
-
 	srv, err := calendar.NewService(context.Background(), option.WithHTTPClient(client))
 	if err != nil {
 		log.Fatalf("Unable to retrieve Calendar client: %v", err)
@@ -46,6 +48,8 @@ func getClient(config *oauth2.Config, tokenPath string) *calendar.Service {
 
 // Request a token from the web, then returns the retrieved token.
 func getTokenFromWeb(config *oauth2.Config, tokenPath string) *oauth2.Token {
+	// make a state token to prevent CSRF attacks:
+	state := randomString(16)
 	// We'll use a channel to block until we get the authorization code
 	codeCh := make(chan string)
 
@@ -54,8 +58,13 @@ func getTokenFromWeb(config *oauth2.Config, tokenPath string) *oauth2.Token {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
-		fmt.Fprintln(w, "Received authentication code. You can close this page now.") // nolint: errcheck
-		codeCh <- code                                                                // Send code to our waiting getTokenFromWeb function
+		recvState := r.URL.Query().Get("state")
+		if recvState != state {
+			_, _ = fmt.Fprintf(w, "Invalid state: %s\n", recvState) // nolint: errcheck
+			return
+		}
+		_, _ = fmt.Fprintln(w, "Received authentication code. You can close this page now.") // nolint: errcheck
+		codeCh <- code                                                                       // Send code to our waiting getTokenFromWeb function
 	})
 
 	go func() {
@@ -66,12 +75,14 @@ func getTokenFromWeb(config *oauth2.Config, tokenPath string) *oauth2.Token {
 
 	// Here, set your redirect URL to `http://localhost:8066/`
 	// This should match one of the URIs you set in your Google Developer Console
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("redirect_uri", "http://localhost:8066/"))
+	authURL := config.AuthCodeURL(state,
+		oauth2.AccessTypeOffline,
+		oauth2.SetAuthURLParam("redirect_uri", "http://localhost:8066/"),
+	)
 	fmt.Printf("Go to the following link in your browser:\n%v\n", authURL)
 
 	// Block until we receive the code
 	authCode := <-codeCh
-	fmt.Println("code received from channel")
 	// Shutdown the server
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -80,13 +91,11 @@ func getTokenFromWeb(config *oauth2.Config, tokenPath string) *oauth2.Token {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("HTTP server Shutdown: %v", err)
 	}
-
 	tok, err := config.Exchange(context.TODO(), authCode,
 		oauth2.SetAuthURLParam("redirect_uri", "http://localhost:8066/"))
 	if err != nil {
 		log.Fatalf("Unable to retrieve token from web: %v", err)
 	}
-
 	err = saveToken(tokenPath, tok)
 	if err != nil {
 		log.Fatalf("Unable to save token: %v", err)
@@ -95,14 +104,23 @@ func getTokenFromWeb(config *oauth2.Config, tokenPath string) *oauth2.Token {
 	return tok
 }
 
+// randomString returns a random string of the specified length, using A-Z, a-z, 0-9
+func randomString(i int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, i)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
 // Retrieves a token from a local file.
 func tokenFromFile(file string) (*oauth2.Token, error) {
-	fmt.Printf("Loading token from file: %s\n", file)
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer f.Close() // nolint: errcheck
 	tok := &oauth2.Token{}
 	err = json.NewDecoder(f).Decode(tok)
 	if err != nil {
@@ -113,7 +131,6 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 
 // Saves a token to a file path.
 func saveToken(path string, token *oauth2.Token) error {
-	fmt.Printf("Saving credential file to: %s\n", path)
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("os.Create: %w", err)
@@ -182,14 +199,12 @@ func main() {
 			TimeZone: "UTC",
 		},
 	}
-	fmt.Printf("Event: %+v\n", event)
-	fmt.Printf("Creating event: %s %s\n", event.Summary, now)
 
 	event, err = srv.Events.Insert(config.CalendarID, event).Do()
 	if err != nil {
 		log.Fatalf("Unable to create event. %v\n", err)
 	}
-	fmt.Printf("Event created: %s\n", event.HtmlLink)
+	fmt.Printf("Event created: %s\nLink %s\n", event.Summary, event.HtmlLink)
 }
 
 func getConfig(path string) (Config, error) {
