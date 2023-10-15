@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -15,6 +17,9 @@ import (
 	"path/filepath"
 	"time"
 )
+
+//go:embed credentials.json
+var googleCredentials []byte
 
 type Config struct {
 	CalendarID     string `json:"calendar_id"`
@@ -36,7 +41,9 @@ func getClient(config *oauth2.Config, tokenPath string) *calendar.Service {
 		tok = getTokenFromWeb(config, tokenPath)
 	}
 	if tok != nil {
-		fmt.Printf("Token loaded, len(refresh) is %d\n", len(tok.RefreshToken))
+		if len(tok.RefreshToken) == 0 {
+			log.Println("No refresh token found, please delete token.json, revoke the token and try again.")
+		}
 	}
 	client := config.Client(context.Background(), tok)
 	srv, err := calendar.NewService(context.Background(), option.WithHTTPClient(client))
@@ -149,7 +156,6 @@ func saveToken(path string, token *oauth2.Token) error {
 
 func main() {
 	configPath := getConfigPath()
-
 	// Check if gconfig directory exists, if not, create it.
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		err := os.Mkdir(configPath, os.ModePerm)
@@ -157,54 +163,65 @@ func main() {
 			log.Fatalf("Unable to create config directory: %v", err)
 		}
 	}
-
-	credentialsPath := filepath.Join(configPath, "credentials.json")
 	tokenPath := filepath.Join(configPath, "token.json")
 
-	// Load client secrets from a file.
-	b, err := os.ReadFile(credentialsPath)
-	if err != nil {
-		log.Fatalf("Unable to read client secret file: %v", err)
-	}
-
 	// If modifying these scopes, delete your previously saved token.json.
-	gconfig, err := google.ConfigFromJSON(b, calendar.CalendarEventsScope)
+	gconfig, err := google.ConfigFromJSON(googleCredentials, calendar.CalendarEventsScope)
 	if err != nil {
 		log.Fatalf("Unable to parse client secret file to gconfig: %v", err)
 	}
-	srv := getClient(gconfig, tokenPath)
-
+	calService := getClient(gconfig, tokenPath)
 	// load the config file:
 	config, err := getConfig(configPath)
 	if err != nil {
 		log.Fatalf("Unable to load config file: %v", err)
 	}
-	user := getUser(config.User)
-	if user == "" {
-		log.Fatal("Unable to determine user, please set $USER or add user to config file")
+	listAction, date, message, err := parseArgs(config.DefaultMessage)
+	if err != nil {
+		fmt.Printf("while parsing arguments and flags: %v\n", err)
+		os.Exit(1)
 	}
-	now := time.Now().Format("2006-01-02") // This will format the time as "yyyy-mm-dd"
-	message := config.DefaultMessage
-	if message == "" {
-		message = "%s - working from home"
+	if listAction {
+		// just list the events and then exit.
+		listEvents(calService, config, date)
+		os.Exit(0)
 	}
 	event := &calendar.Event{
-		Summary: fmt.Sprintf(message, user),
+		Summary: message,
 		Start: &calendar.EventDateTime{
-			Date:     now,
+			Date:     date.Format("2006-01-02"),
 			TimeZone: "UTC",
 		},
 		End: &calendar.EventDateTime{
-			Date:     now,
+			Date:     date.Format("2006-01-02"),
 			TimeZone: "UTC",
 		},
 	}
 
-	event, err = srv.Events.Insert(config.CalendarID, event).Do()
+	event, err = calService.Events.Insert(config.CalendarID, event).Do()
 	if err != nil {
 		log.Fatalf("Unable to create event. %v\n", err)
 	}
 	fmt.Printf("Event created: %s\nLink %s\n", event.Summary, event.HtmlLink)
+}
+
+// listEvents lists the events for the given date.
+func listEvents(service *calendar.Service, config Config, date time.Time) {
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	endOfDay := time.Date(date.Year(), date.Month(), date.Day(), 23, 59, 59, 999999999, time.UTC)
+	events, err := service.Events.List(config.CalendarID).ShowDeleted(false).
+		SingleEvents(true).TimeMin(startOfDay.Format(time.RFC3339)).TimeMax(endOfDay.Format(time.RFC3339)).OrderBy("startTime").Do()
+	if err != nil {
+		log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
+	}
+	if len(events.Items) == 0 {
+		fmt.Println("No events found.")
+	} else {
+		fmt.Println("Events:")
+		for _, item := range events.Items {
+			fmt.Printf("%v (%v)\n", item.Summary, item.Start.DateTime)
+		}
+	}
 }
 
 func getConfig(path string) (Config, error) {
@@ -223,9 +240,40 @@ func getConfig(path string) (Config, error) {
 	return config, nil
 }
 
-func getUser(user string) string {
-	if user == "" {
-		return os.Getenv("USER")
+func parseArgs(defaultMessage string) (bool, time.Time, string, error) {
+	// Define flags for the date and message arguments with default values of empty strings.
+	dateFlag := flag.String("date", "", "Provide a date in the format YYYY-MM-DD")
+	messageFlag := flag.String("message", "", "Provide a custom message")
+	list := flag.Bool("list", false, "List all events")
+
+	// Parse the flags
+	flag.Parse()
+	// Check if there are any non-flag arguments and fail if there are
+	if len(flag.Args()) > 0 {
+		return false, time.Time{}, "", fmt.Errorf("unexpected non-flag arguments detected")
 	}
-	return user
+
+	// Parse the date if provided
+	var parsedDate time.Time
+	if *dateFlag != "" {
+		var err error
+		parsedDate, err = time.Parse("2006-01-02", *dateFlag)
+		if err != nil {
+			// use today's date if the provided date is invalid
+			parsedDate = time.Now()
+		}
+	} else {
+		// use today's date if no date is provided
+		parsedDate = time.Now()
+	}
+	if *list {
+		return true, parsedDate, "", nil
+	}
+	var message string
+	if *messageFlag != "" {
+		message = *messageFlag
+	} else {
+		message = defaultMessage
+	}
+	return false, parsedDate, message, nil
 }
