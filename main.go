@@ -207,10 +207,14 @@ func main() {
 
 // listEvents lists the events for the given date.
 func listEvents(service *calendar.Service, config Config, date time.Time) {
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
-	endOfDay := time.Date(date.Year(), date.Month(), date.Day(), 23, 59, 59, 999999999, time.UTC)
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 6, 0, 0, 0, time.UTC)
+	endOfDay := time.Date(date.Year(), date.Month(), date.Day(), 20, 0, 0, 0, time.UTC)
 	events, err := service.Events.List(config.CalendarID).ShowDeleted(false).
-		SingleEvents(true).TimeMin(startOfDay.Format(time.RFC3339)).TimeMax(endOfDay.Format(time.RFC3339)).OrderBy("startTime").Do()
+		SingleEvents(true).
+		TimeMin(startOfDay.Format(time.RFC3339)).
+		TimeMax(endOfDay.Format(time.RFC3339)).
+		OrderBy("startTime").
+		Do()
 	if err != nil {
 		log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
 	}
@@ -219,7 +223,11 @@ func listEvents(service *calendar.Service, config Config, date time.Time) {
 	} else {
 		fmt.Println("Events:")
 		for _, item := range events.Items {
-			fmt.Printf("%v (%v)\n", item.Summary, item.Start.DateTime)
+			timeString := "(all day)"
+			if item.Start.DateTime != "" {
+				timeString = fmt.Sprintf("(%v --> %v)", item.Start.DateTime, item.End.DateTime)
+			}
+			fmt.Printf("%v %s\n", item.Summary, timeString)
 		}
 	}
 }
