@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -186,7 +187,10 @@ func main() {
 		listEvents(calService, config, date)
 		os.Exit(0)
 	}
+	// pick a random number from 1 to 11:
+	colorId := rand.Intn(11) + 1
 	event := &calendar.Event{
+		ColorId: strconv.Itoa(colorId),
 		Summary: message,
 		Start: &calendar.EventDateTime{
 			Date:     date.Format("2006-01-02"),
@@ -207,9 +211,11 @@ func main() {
 
 // listEvents lists the events for the given date.
 func listEvents(service *calendar.Service, config Config, date time.Time) {
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 6, 0, 0, 0, time.UTC)
-	endOfDay := time.Date(date.Year(), date.Month(), date.Day(), 20, 0, 0, 0, time.UTC)
-	events, err := service.Events.List(config.CalendarID).ShowDeleted(false).
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.Local)
+	endOfDay := time.Date(date.Year(), date.Month(), date.Day(), 23, 0, 0, 0, time.Local)
+	fmt.Printf("listing events for %s to %s\n", startOfDay.Format(time.RFC3339), endOfDay.Format(time.RFC3339))
+	events, err := service.Events.List(config.CalendarID).
+		ShowDeleted(false).
 		SingleEvents(true).
 		TimeMin(startOfDay.Format(time.RFC3339)).
 		TimeMax(endOfDay.Format(time.RFC3339)).
