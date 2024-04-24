@@ -233,9 +233,21 @@ func listEvents(service *calendar.Service, config Config, date time.Time) {
 			if item.Start.DateTime != "" {
 				timeString = fmt.Sprintf("(%v --> %v)", item.Start.DateTime, item.End.DateTime)
 			}
-			fmt.Printf("%v %s\n", item.Summary, timeString)
+			fmt.Printf("%v %s [%s]\n", item.Summary, timeString, shortEmail(item.Creator.Email))
 		}
 	}
+}
+
+func shortEmail(email string) string {
+	atIndex := len(email)
+	for i, c := range email {
+		if c == '@' {
+			atIndex = i
+			break
+		}
+	}
+	return email[:atIndex]
+
 }
 
 func getConfig(path string) (Config, error) {
